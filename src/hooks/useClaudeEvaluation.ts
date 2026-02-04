@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Feedback } from '../types';
 
 const WORKER_URL = import.meta.env.PROD
-  ? 'https://structured-thinking-api.YOUR_SUBDOMAIN.workers.dev/evaluate'
+  ? 'https://structured-thinking-api.misonicomee.workers.dev/evaluate'
   : 'http://localhost:8787/evaluate';
 
 interface EvaluationError {
