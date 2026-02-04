@@ -4,6 +4,7 @@ import { ProblemCard } from './components/ProblemCard';
 import { AnswerInput } from './components/AnswerInput';
 import { ProgressTracker } from './components/ProgressTracker';
 import { FeedbackDisplay } from './components/FeedbackDisplay';
+import { LearningSection } from './components/LearningSection';
 import { useClaudeEvaluation } from './hooks/useClaudeEvaluation';
 
 function App() {
@@ -57,6 +58,9 @@ function App() {
 
           {/* Main Content */}
           <div className="lg:col-span-2">
+            {/* Learning Section */}
+            <LearningSection />
+
             <ProblemCard
               problem={currentProblem}
               problemNumber={state.currentProblemIndex + 1}
