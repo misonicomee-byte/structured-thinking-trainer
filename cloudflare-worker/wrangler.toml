@@ -1,0 +1,9 @@
+name = "structured-thinking-api"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+ALLOWED_ORIGIN = "https://misonicomee-byte.github.io"
+
+# Set ANTHROPIC_API_KEY as a secret:
+# npx wrangler secret put ANTHROPIC_API_KEY
