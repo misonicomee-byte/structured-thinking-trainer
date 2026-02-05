@@ -5,6 +5,7 @@ import { AnswerInput } from './components/AnswerInput';
 import { ProgressTracker } from './components/ProgressTracker';
 import { FeedbackDisplay } from './components/FeedbackDisplay';
 import { LearningSection } from './components/LearningSection';
+import { VideoPlayer } from './components/VideoPlayer';
 import { useClaudeEvaluation } from './hooks/useClaudeEvaluation';
 
 function App() {
@@ -54,6 +55,9 @@ function App() {
               currentProblemIndex={state.currentProblemIndex}
               onProblemSelect={setCurrentProblemIndex}
             />
+
+            {/* Training Video */}
+            <VideoPlayer />
           </div>
 
           {/* Main Content */}
