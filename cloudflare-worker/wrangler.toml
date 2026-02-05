@@ -4,6 +4,8 @@ compatibility_date = "2024-01-01"
 
 [vars]
 ALLOWED_ORIGIN = "https://misonicomee-byte.github.io"
+CHATWORK_ROOM_ID = "396889730"
 
-# Set ANTHROPIC_API_KEY as a secret:
+# Set secrets:
 # npx wrangler secret put ANTHROPIC_API_KEY
+# npx wrangler secret put CHATWORK_API_TOKEN

@@ -1,7 +1,68 @@
-import Anthropic from '@anthropic-ai/sdk';
-
 const RATE_LIMIT = 10; // requests per IP per minute
 const rateLimitMap = new Map();
+
+// Problem titles
+const PROBLEM_TITLES = {
+  'problem-1': '退院前カンファレンス準備',
+  'problem-2': '業務が忙しい原因分析',
+  'problem-3': '新規連携先への説明'
+};
+
+// Send Chatwork notification
+async function sendChatworkNotification(env, problemId, answer, evaluation) {
+  console.log('Starting Chatwork notification...');
+
+  if (!env.CHATWORK_API_TOKEN) {
+    console.error('CHATWORK_API_TOKEN not configured');
+    return;
+  }
+
+  if (!env.CHATWORK_ROOM_ID) {
+    console.error('CHATWORK_ROOM_ID not configured');
+    return;
+  }
+
+  const problemTitle = PROBLEM_TITLES[problemId] || problemId;
+  const answerPreview = answer.length > 200 ? answer.substring(0, 200) + '...' : answer;
+
+  const message = `[info][title]構造化思考トレーニング - AI評価完了[/title]
+📝 問題: ${problemTitle}
+📊 スコア: ${evaluation.score}/5点
+
+【回答内容】
+${answerPreview}
+
+【✅ 良かった点】
+${evaluation.strengths.map((s, i) => `${i + 1}. ${s}`).join('\n')}
+
+【💡 改善点】
+${evaluation.improvements.map((imp, i) => `${i + 1}. ${imp}`).join('\n')}
+
+【🎯 具体的な提案】
+${evaluation.suggestions.map((sug, i) => `${i + 1}. ${sug}`).join('\n')}[/info]`;
+
+  try {
+    console.log(`Sending to Chatwork room: ${env.CHATWORK_ROOM_ID}`);
+    const response = await fetch(`https://api.chatwork.com/v2/rooms/${env.CHATWORK_ROOM_ID}/messages`, {
+      method: 'POST',
+      headers: {
+        'X-ChatWorkToken': env.CHATWORK_API_TOKEN,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: `body=${encodeURIComponent(message)}`
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Chatwork API error: ${response.status} - ${errorText}`);
+    } else {
+      const result = await response.json();
+      console.log('Chatwork notification sent successfully:', result);
+    }
+  } catch (error) {
+    console.error('Failed to send Chatwork notification:', error.message, error.stack);
+  }
+}
 
 // CORS headers
 function getCorsHeaders(origin, env) {
@@ -105,7 +166,7 @@ ${answer}
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const origin = request.headers.get('Origin');
     const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
@@ -160,20 +221,35 @@ export default {
         );
       }
 
-      // Call Claude API
-      const anthropic = new Anthropic({
-        apiKey: env.ANTHROPIC_API_KEY,
+      // Call Claude API directly with fetch
+      if (!env.ANTHROPIC_API_KEY) {
+        throw new Error('ANTHROPIC_API_KEY is not configured');
+      }
+
+      const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5-20250929',
+          max_tokens: 1024,
+          temperature: 0,
+          messages: [{
+            role: 'user',
+            content: createEvaluationPrompt(problemId, answer)
+          }]
+        })
       });
 
-      const message = await anthropic.messages.create({
-        model: 'claude-sonnet-4-5-20250929',
-        max_tokens: 1024,
-        temperature: 0,
-        messages: [{
-          role: 'user',
-          content: createEvaluationPrompt(problemId, answer)
-        }]
-      });
+      if (!claudeResponse.ok) {
+        const errorData = await claudeResponse.text();
+        throw new Error(`Claude API error: ${claudeResponse.status} - ${errorData}`);
+      }
+
+      const message = await claudeResponse.json();
 
       // Parse response
       const responseText = message.content[0].text;
@@ -194,6 +270,11 @@ export default {
       ) {
         throw new Error('Invalid evaluation structure');
       }
+
+      // Send Chatwork notification (use waitUntil to ensure it completes)
+      ctx.waitUntil(
+        sendChatworkNotification(env, problemId, answer, evaluation)
+      );
 
       return new Response(
         JSON.stringify(evaluation),
