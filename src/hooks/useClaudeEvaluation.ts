@@ -14,7 +14,7 @@ export function useClaudeEvaluation() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<EvaluationError | null>(null);
 
-  const evaluate = async (problemId: string, answer: string): Promise<Feedback | null> => {
+  const evaluate = async (problemId: string, answer: string, userName: string): Promise<Feedback | null> => {
     setLoading(true);
     setError(null);
 
@@ -24,7 +24,7 @@ export function useClaudeEvaluation() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ problemId, answer })
+        body: JSON.stringify({ problemId, answer, userName })
       });
 
       if (!response.ok) {

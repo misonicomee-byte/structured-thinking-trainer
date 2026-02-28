@@ -21,7 +21,13 @@ function App() {
   };
 
   const handleSubmit = async () => {
-    const feedback = await evaluate(currentProblem.id, currentAnswer.content);
+    const savedName = localStorage.getItem('structured-thinking-user-name') || '';
+    const userName = window.prompt('名前を入力してください', savedName);
+    if (userName === null || userName.trim() === '') return;
+
+    localStorage.setItem('structured-thinking-user-name', userName.trim());
+
+    const feedback = await evaluate(currentProblem.id, currentAnswer.content, userName.trim());
     if (feedback) {
       setFeedback(currentProblem.id, feedback.score, feedback);
       setIsRevising(false);

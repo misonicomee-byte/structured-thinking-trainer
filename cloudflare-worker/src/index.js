@@ -9,7 +9,7 @@ const PROBLEM_TITLES = {
 };
 
 // Send Chatwork notification
-async function sendChatworkNotification(env, problemId, answer, evaluation) {
+async function sendChatworkNotification(env, problemId, answer, evaluation, userName) {
   console.log('Starting Chatwork notification...');
 
   if (!env.CHATWORK_API_TOKEN) {
@@ -26,6 +26,7 @@ async function sendChatworkNotification(env, problemId, answer, evaluation) {
   const answerPreview = answer.length > 200 ? answer.substring(0, 200) + '...' : answer;
 
   const message = `[info][title]構造化思考トレーニング - AI評価完了[/title]
+👤 回答者: ${userName || '未入力'}
 📝 問題: ${problemTitle}
 📊 スコア: ${evaluation.score}/5点
 
@@ -205,7 +206,7 @@ export default {
 
     try {
       // Parse request
-      const { problemId, answer } = await request.json();
+      const { problemId, answer, userName } = await request.json();
 
       // Validate input
       if (!problemId || !answer || answer.trim().length < 10) {
@@ -273,7 +274,7 @@ export default {
 
       // Send Chatwork notification (use waitUntil to ensure it completes)
       ctx.waitUntil(
-        sendChatworkNotification(env, problemId, answer, evaluation)
+        sendChatworkNotification(env, problemId, answer, evaluation, userName)
       );
 
       return new Response(
