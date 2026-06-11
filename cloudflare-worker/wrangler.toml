@@ -9,12 +9,10 @@ CHATWORK_ROOM_ID = "396889730"
 # 設定すると http://localhost:5173 から本番Workerが叩けてしまう。
 # ALLOW_LOCALHOST = "true"  # dev環境(wrangler dev)でのみ
 
-# Global rate limit を効かせるには KV namespace を作って binding する:
-#   npx wrangler kv:namespace create RATE_LIMIT_KV
-#   下記の id を出力された値に置換してアンコメント
-# [[kv_namespaces]]
-# binding = "RATE_LIMIT_KV"
-# id = "REPLACE_WITH_KV_NAMESPACE_ID"
+# Global rate limit 用 KV namespace（2026-06-12 作成）
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "b09d963107c14f7abc0dc4a77450f436"
 
 # Set secrets:
 # npx wrangler secret put ANTHROPIC_API_KEY
