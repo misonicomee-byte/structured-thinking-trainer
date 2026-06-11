@@ -5,6 +5,16 @@ compatibility_date = "2024-01-01"
 [vars]
 ALLOWED_ORIGIN = "https://misonicomee-byte.github.io"
 CHATWORK_ROOM_ID = "396889730"
+# ALLOW_LOCALHOST は本番では設定しないこと（dev 専用フラグ）。
+# 設定すると http://localhost:5173 から本番Workerが叩けてしまう。
+# ALLOW_LOCALHOST = "true"  # dev環境(wrangler dev)でのみ
+
+# Global rate limit を効かせるには KV namespace を作って binding する:
+#   npx wrangler kv:namespace create RATE_LIMIT_KV
+#   下記の id を出力された値に置換してアンコメント
+# [[kv_namespaces]]
+# binding = "RATE_LIMIT_KV"
+# id = "REPLACE_WITH_KV_NAMESPACE_ID"
 
 # Set secrets:
 # npx wrangler secret put ANTHROPIC_API_KEY

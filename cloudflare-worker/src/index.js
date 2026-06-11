@@ -1,5 +1,21 @@
 const RATE_LIMIT = 10; // requests per IP per minute
+const MAX_ANSWER_LENGTH = 5000;  // chars; over this -> 400 to cap Claude billing
+const MAX_NAME_LENGTH = 50;
+
+// In-memory fallback when RATE_LIMIT_KV binding is absent.
+// NOTE: Workers spawn one isolate per colo, so this map is NOT a real DoS
+// defense — set up env.RATE_LIMIT_KV in wrangler.toml + Cloudflare dashboard
+// for a globally-coordinated limit. The Cloudflare-side "Rate Limiting Rules"
+// product is also recommended in front of the Worker.
 const rateLimitMap = new Map();
+
+// Chatwork BBCode を無害化（角括弧を全角に置換）。
+// 攻撃者が userName や answer に [/info][info][title]... を仕込んでも
+// 同じ Chatwork メッセージで偽の通知ブロックを偽装できないようにする。
+function sanitizeBBCode(text) {
+  if (typeof text !== 'string') return '';
+  return text.replace(/\[/g, '［').replace(/\]/g, '］');
+}
 
 // Problem titles
 const PROBLEM_TITLES = {
@@ -25,22 +41,29 @@ async function sendChatworkNotification(env, problemId, answer, evaluation, user
   const problemTitle = PROBLEM_TITLES[problemId] || problemId;
   const answerPreview = answer.length > 200 ? answer.substring(0, 200) + '...' : answer;
 
+  // ユーザ入力をすべて sanitize（BBCodeインジェクション対策）
+  const safeName = sanitizeBBCode(userName || '未入力');
+  const safeAnswer = sanitizeBBCode(answerPreview);
+  const safeStrengths = (evaluation.strengths || []).map(s => sanitizeBBCode(String(s)));
+  const safeImprovements = (evaluation.improvements || []).map(s => sanitizeBBCode(String(s)));
+  const safeSuggestions = (evaluation.suggestions || []).map(s => sanitizeBBCode(String(s)));
+
   const message = `[info][title]構造化思考トレーニング - AI評価完了[/title]
-👤 回答者: ${userName || '未入力'}
+👤 回答者: ${safeName}
 📝 問題: ${problemTitle}
 📊 スコア: ${evaluation.score}/5点
 
 【回答内容】
-${answerPreview}
+${safeAnswer}
 
 【✅ 良かった点】
-${evaluation.strengths.map((s, i) => `${i + 1}. ${s}`).join('\n')}
+${safeStrengths.map((s, i) => `${i + 1}. ${s}`).join('\n')}
 
 【💡 改善点】
-${evaluation.improvements.map((imp, i) => `${i + 1}. ${imp}`).join('\n')}
+${safeImprovements.map((imp, i) => `${i + 1}. ${imp}`).join('\n')}
 
 【🎯 具体的な提案】
-${evaluation.suggestions.map((sug, i) => `${i + 1}. ${sug}`).join('\n')}[/info]`;
+${safeSuggestions.map((sug, i) => `${i + 1}. ${sug}`).join('\n')}[/info]`;
 
   try {
     console.log(`Sending to Chatwork room: ${env.CHATWORK_ROOM_ID}`);
@@ -55,21 +78,41 @@ ${evaluation.suggestions.map((sug, i) => `${i + 1}. ${sug}`).join('\n')}[/info]`
 
     if (!response.ok) {
       const errorText = await response.text();
+      // CloudflareのLogsで chatwork_notify_failure として grep できるよう
+      // 構造化された1行 JSON も併せて出力
       console.error(`Chatwork API error: ${response.status} - ${errorText}`);
+      console.error(JSON.stringify({
+        event: 'chatwork_notify_failure',
+        kind: 'http_error',
+        status: response.status,
+        problemId,
+        userName: userName || null,
+      }));
     } else {
       const result = await response.json();
       console.log('Chatwork notification sent successfully:', result);
     }
   } catch (error) {
     console.error('Failed to send Chatwork notification:', error.message, error.stack);
+    console.error(JSON.stringify({
+      event: 'chatwork_notify_failure',
+      kind: 'exception',
+      message: error.message,
+      problemId,
+      userName: userName || null,
+    }));
   }
 }
 
 // CORS headers
 function getCorsHeaders(origin, env) {
   const allowedOrigin = env.ALLOWED_ORIGIN || 'https://misonicomee-byte.github.io';
+  // localhost は env.ALLOW_LOCALHOST が 'true' のときだけ許可。
+  // 本番 wrangler.toml では未設定 -> dev サーバー(localhost:5173)からは
+  // production Worker を叩けなくなる（オープンプロキシ化を防止）。
+  const allowLocalhost = env.ALLOW_LOCALHOST === 'true';
 
-  if (origin === allowedOrigin || origin === 'http://localhost:5173') {
+  if (origin === allowedOrigin || (allowLocalhost && origin === 'http://localhost:5173')) {
     return {
       'Access-Control-Allow-Origin': origin,
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -82,19 +125,38 @@ function getCorsHeaders(origin, env) {
 }
 
 // Rate limiting
-function checkRateLimit(ip) {
+// 1) env.RATE_LIMIT_KV (Workers KV binding) があれば KV をカウンタとして使い、
+//    Worker isolate を跨いでグローバルに集計する
+// 2) 無ければ in-memory Map にフォールバック（dev用、本番では入れること）
+async function checkRateLimit(ip, env) {
   const now = Date.now();
-  const record = rateLimitMap.get(ip) || { count: 0, resetAt: now + 60000 };
 
+  if (env.RATE_LIMIT_KV) {
+    const key = `rl:${ip}`;
+    const stored = await env.RATE_LIMIT_KV.get(key, { type: 'json' });
+    let record = stored && now <= stored.resetAt
+      ? stored
+      : { count: 0, resetAt: now + 60000 };
+
+    if (record.count >= RATE_LIMIT) {
+      return false;
+    }
+    record.count++;
+    // TTLは「resetAt まで + 安全マージン10秒」
+    const ttlSec = Math.max(60, Math.ceil((record.resetAt - now) / 1000) + 10);
+    await env.RATE_LIMIT_KV.put(key, JSON.stringify(record), { expirationTtl: ttlSec });
+    return true;
+  }
+
+  // Fallback: in-memory (best effort, isolate単位)
+  const record = rateLimitMap.get(ip) || { count: 0, resetAt: now + 60000 };
   if (now > record.resetAt) {
     record.count = 0;
     record.resetAt = now + 60000;
   }
-
   if (record.count >= RATE_LIMIT) {
     return false;
   }
-
   record.count++;
   rateLimitMap.set(ip, record);
   return true;
@@ -191,7 +253,7 @@ export default {
     }
 
     // Check rate limit
-    if (!checkRateLimit(ip)) {
+    if (!(await checkRateLimit(ip, env))) {
       return new Response(
         JSON.stringify({ error: '評価リクエストが多すぎます。1分後に再試行してください。' }),
         {
@@ -219,6 +281,20 @@ export default {
               'Content-Type': 'application/json',
             }
           }
+        );
+      }
+
+      // Length caps to prevent runaway Anthropic API charges from malicious payloads
+      if (answer.length > MAX_ANSWER_LENGTH) {
+        return new Response(
+          JSON.stringify({ error: `回答が長すぎます（${answer.length}文字）。${MAX_ANSWER_LENGTH}文字以内でご記入ください。` }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      if (userName && typeof userName === 'string' && userName.length > MAX_NAME_LENGTH) {
+        return new Response(
+          JSON.stringify({ error: `回答者名が長すぎます（${MAX_NAME_LENGTH}文字以内）。` }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
 
