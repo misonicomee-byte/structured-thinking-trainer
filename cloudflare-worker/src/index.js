@@ -308,12 +308,15 @@ export default {
         headers: {
           'Content-Type': 'application/json',
           'x-api-key': env.ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01'
+          'anthropic-version': '2023-06-01',
+          'anthropic-beta': 'server-side-fallback-2026-07-01'
         },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-5-20250929',
-          max_tokens: 1024,
-          temperature: 0,
+          model: 'claude-sonnet-5-5',
+          // Room for adaptive thinking plus the JSON reply
+          max_tokens: 8000,
+          output_config: { effort: 'low' },
+          fallbacks: 'default',
           messages: [{
             role: 'user',
             content: createEvaluationPrompt(problemId, answer)
@@ -329,7 +332,15 @@ export default {
       const message = await claudeResponse.json();
 
       // Parse response
-      const responseText = message.content[0].text;
+      if (message.stop_reason === 'refusal') {
+        throw new Error(`Claude refused the request: ${message.stop_details?.category ?? 'unknown'}`);
+      }
+
+      // Responses may start with thinking blocks; take the text block
+      const responseText = message.content
+        .filter((block) => block.type === 'text')
+        .map((block) => block.text)
+        .join('');
       const jsonMatch = responseText.match(/\{[\s\S]*\}/);
 
       if (!jsonMatch) {
